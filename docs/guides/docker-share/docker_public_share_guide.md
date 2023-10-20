@@ -5,7 +5,7 @@ sidebar_label: Public Share
 
 # Docker Public Share
 
-With zrok, you can publicly share a server app that's running in another Docker container, or any server that's reachable by the zrok container.
+With zrok and Docker, you can publicly share a web server that's running in a local container or anywhere that's reachable by the zrok container. The share can be reached through a public URL thats temporary or reserved (persistent).
 
 ## Walkthrough Video
 
@@ -15,61 +15,129 @@ With zrok, you can publicly share a server app that's running in another Docker 
 
 To follow this guide you will need [Docker](https://docs.docker.com/get-docker/) and [the Docker Compose plugin](https://docs.docker.com/compose/install/) for running `docker compose` commands in your terminal.
 
-## Public Share with Docker Compose
+## Temporary or Reserved Public Share
+
+A temporary public share is a great way to share a web server running in a container with someone else for a short time. A reserved public share is a great way to share a reliable web server running in a container with someone else for a long time.
 
 1. Make a folder on your computer to use as a Docker Compose project for your zrok public share.
-1. In your terminal, change directory to your newly-created project folder.
-1. Download [the zrok-public-share Docker Compose project file](pathname:///zrok-public-share/docker-compose.yml) into your new project folder.
+1. In your terminal, change directory to the newly-created project folder.
+1. Download either [the temporary public share project file](pathname:///zrok-public-share/compose.yml) or [the reserved public share project file](pathname:///zrok-public-share-reserved/compose.yml) into the project folder.
 1. Copy your zrok environment token from the zrok web console to your clipboard and paste it in a file named `.env` in the same folder like this:
 
-    ```bash
-    # file name ".env"
+    ```bash title=".env"
     ZROK_ENABLE_TOKEN="8UL9-48rN0ua"
     ```
 
-1. If you are self-hosting zrok then it's important to set your API endpoint URL too. If you're using the hosted zrok service then you can skip this step.
+1. Set the zrok API endpoint if self-hosting zrok. Skip this if using zrok.io.
 
-    ```bash
-    # file name ".env"
+    ```bash title=".env"
     ZROK_API_ENDPOINT="https://zrok.example.com"
     ```
 
-1. Run your Compose project to start sharing the built-in demo web server:
+1. Run the Compose project to start sharing the built-in demo web server.
 
     ```bash
-    docker compose up
+    docker compose up --detach
     ```
 
-1. Read the public share URL from the output. One of the last lines is like this:
+1. Get the public share URL from the output of the `zrok-share` service.
 
     ```bash
+    docker compose logs zrok-share
+    ```
+
+    ```buttonless title="Output"
     zrok-public-share-1  |  https://w6r1vesearkj.in.zrok.io/
     ```
 
-    You can swap in a different server app container instead of the demo server, or you could change the Docker network to "host" and share something running on the Docker host's localhost interface.
+This concludes sharing the demo web server. Read on to learn how to pivot to sharing any web server leveraging additional zrok backend modes.
 
-1. Edit the file `docker-compose.yml`. Replace the following line:
+## Share Any Web Server or Static HTML Site
 
-    ```yaml
-    command: share public --headless http://zrok-test:9090
+You can override the base configuration of the public share Compose project with a `compose.override.yml` file. This allows you to share any web server with the `proxy` backend mode, or any filesystem directory as a static HTML site with the `web` mode. Run `zrok public share --help` for more information about the available options.
+
+### Customize a Temporary Public Share
+
+1. Create a file `compose.override.yml`. You may leverage any backend mode and upstream server address with this approach. This example demonstrates sharing a directory `/tmp/html` from the host filesystem.
+
+    ```yaml title="compose.override.yml"
+    services:
+      zrok-share:
+        command: share public --headless --backend-mode web /tmp/html
+        volumes:
+          - /tmp/html:/tmp/html
     ```
 
-    Replace that line with this to start sharing the HTTPBin server app container instead of the zrok test endpoint.
-
-    ```yaml
-    command: share public --headless http://httpbin-test:8080
-    ```
-
-1. Re-run your project to load the new server configuration.
+1. Re-run the project to load the new configuration.
 
     ```bash
-    docker-compose up --force-recreate
+    docker compose up --force-recreate
     ```
 
-    Now you'll have a new public share URL for the `httpbin` API testing server.
-
-1. Run "down" to destroy the Compose project when you're done. Then delete the selected zrok environment by clicking "Actions" in the web console.
+1. Get the new tempoary public share URL for the `zrok-share` container.
 
     ```bash
-    docker compose down --remove-orphans --volumes
+    docker compose logs zrok-share
     ```
+
+    ```buttonless title="Output"
+    zrok-public-share-1  |  https://w6r1vesearkj.in.zrok.io/
+    ```
+
+### Customize a Reserved Public Share
+
+1. Create a file `compose.override.yml`. You may leverage any backend mode and upstream server address with this approach. This example demonstrates adding and sharing a new web server container named `httpbin`.
+
+    ```yaml title="compose.override.yml"
+    services:
+      zrok-share:
+        command: -- share reserved --headless --override-endpoint http://httpbin:8080
+      httpbin:
+        image: mccutchen/go-httpbin  # 8080/tcp
+    ```
+
+1. Re-run the project to load the new configuration.
+
+    ```bash
+    docker compose up --force-recreate
+    ```
+
+1. The reserved public share's URL doesn't change as long as you keep using the same zrok backend mode, e.g. `proxy`, but you can remind yourself of the reserved public share URL by peeking at the logs of the `zrok-share` container.
+
+    ```bash
+    docker compose logs zrok-share
+    ```
+
+    ```buttonless title="Output"
+    INFO: zrok public URL: https://88s803f2qvao.in.staging.zrok.io/
+    ```
+
+#### Change the Reserved Public Share Backend Mode
+
+Changing the backend mode of a reserved public share requires creating a new share.
+
+1. Destroy the existing environment. zrok itself does not require a new environment for a new share, but the Compose project has no way to distinguish between the old and new share so a new environment is recommended to ensure the intended resource is shared.
+
+    ```bash
+    docker compose down --volumes
+    ```
+
+1. Modify the `compose.override.yml` file to use a different backend mode. This example demonstrates changing the backend mode to `web` and sharing a static HTML directory `/tmp/html` from the Docker host's filesystem.
+
+    ```yaml title="compose.override.yml"
+    services:
+      zrok-reserve:
+        command: -- reserve public --backend-mode web /tmp/html
+      zrok-share:
+        command: -- share reserved --headless
+        volumes:
+          - /tmp/html:/tmp/html
+    ```
+
+## Destroy the zrok Environment
+
+This destroys the Docker volumes containing the zrok environment secrets. The zrok environment can also be destroyed in the web console.
+
+```bash
+docker compose down --volumes
+```
